@@ -87,16 +87,12 @@ func writeJSON(w http.ResponseWriter, code int, v any) error {
 }
 
 type LatestImagesResponse struct {
-	IDs []string `json:"ids"`
+	FileNames []string `json:"filenames"`
 }
 
-func NewLatestImagesResponse(ids []uuid.UUID) LatestImagesResponse {
-	strIDs := make([]string, 0, len(ids))
-	for _, id := range ids {
-		strIDs = append(strIDs, id.String())
-	}
+func NewLatestImagesResponse(fileNames []string) LatestImagesResponse {
 	return LatestImagesResponse{
-		IDs: strIDs,
+		FileNames: fileNames,
 	}
 }
 
@@ -110,26 +106,26 @@ func (s *Server) handleLatest(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	// we can use uuid since they are v7
-	rows, err := s.db.QueryContext(r.Context(), `SELECT id FROM images ORDER BY id DESC LIMIT ? `, n)
+	rows, err := s.db.QueryContext(r.Context(), `SELECT filename FROM images ORDER BY id DESC LIMIT ? `, n)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 
-	var ids []uuid.UUID
+	filenames := make([]string, 0)
 	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
+		var f string
+		if err := rows.Scan(&f); err != nil {
 			return err
 		}
-		ids = append(ids, id)
+		filenames = append(filenames, f)
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	slog.Debug("Fetched ids", "ids", ids)
+	slog.Debug("Fetched files", "filenames", filenames)
 
-	writeJSON(w, http.StatusOK, NewLatestImagesResponse(ids))
+	writeJSON(w, http.StatusOK, NewLatestImagesResponse(filenames))
 
 	return nil
 }
@@ -142,6 +138,12 @@ func NewUploadResponse(id uuid.UUID) UploadResponse {
 	return UploadResponse{ID: id.String()}
 }
 
+var allowedExtensions = map[string]string{
+	"image/jpeg": ".jpeg",
+	"image/png":  ".png",
+	"image/webp": ".webp",
+}
+
 func (s *Server) handleUploads(w http.ResponseWriter, r *http.Request) error {
 	//TODO: Allow for multipart
 	const limit = 1024 * 1024 * 10 //10MB
@@ -152,11 +154,16 @@ func (s *Server) handleUploads(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return NewApiError(http.StatusBadRequest, "invalid content type", err)
 	}
+	ext, ok := allowedExtensions[mediaType]
+	if !ok {
+		return NewApiError(http.StatusUnsupportedMediaType, "unsuported media type", nil)
+	}
 
 	//TODO: duplicate checK? no since the same images can just be uplaoded again by someone in an insta clone.
 
 	id := uuid.NewV7()
-	filePath := filepath.Join(s.imageStorageDir, id.String())
+	fileName := id.String() + ext
+	filePath := filepath.Join(s.imageStorageDir, fileName)
 	file, err := os.Create(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to create file: %w", err)
@@ -173,8 +180,8 @@ func (s *Server) handleUploads(w http.ResponseWriter, r *http.Request) error {
 	file.Close()
 
 	//abstract writes behind interface
-	_, err = s.db.ExecContext(r.Context(), `INSERT INTO images(id, image_type, uploaded_at) VALUES (?,?,?)`,
-		id, mediaType, time.Now())
+	_, err = s.db.ExecContext(r.Context(), `INSERT INTO images(id, filename, uploaded_at) VALUES (?,?,?)`,
+		id, fileName, time.Now())
 	if err != nil {
 		if err := os.Remove(file.Name()); err != nil {
 			slog.Error("Failed to delete file wich was already created", "err", err)

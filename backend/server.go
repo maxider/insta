@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 	"uuid"
 )
@@ -65,7 +66,7 @@ func handle(h handleFunc) http.HandlerFunc {
 			if !errors.As(err, &apiErr) {
 				apiErr = &APIError{Code: http.StatusInternalServerError, Message: "internal server error"}
 			}
-			writeJson(w, apiErr.Code, apiErr)
+			writeJSON(w, apiErr.Code, apiErr)
 
 			level = slog.LevelError
 			msg = "request failed"
@@ -79,10 +80,66 @@ func handle(h handleFunc) http.HandlerFunc {
 	}
 }
 
-func writeJson(w http.ResponseWriter, code int, v any) error {
+func writeJSON(w http.ResponseWriter, code int, v any) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	return json.NewEncoder(w).Encode(v)
+}
+
+type LatestImagesResponse struct {
+	IDs []string `json:"ids"`
+}
+
+func NewLatestImagesResponse(ids []uuid.UUID) LatestImagesResponse {
+	strIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		strIDs = append(strIDs, id.String())
+	}
+	return LatestImagesResponse{
+		IDs: strIDs,
+	}
+}
+
+func (s *Server) handleLatest(w http.ResponseWriter, r *http.Request) error {
+	const limit = 20
+	n := limit
+	if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
+		if parsed, err := strconv.Atoi(limitParam); err == nil && parsed > 0 {
+			n = min(limit, parsed)
+		}
+	}
+
+	// we can use uuid since they are v7
+	rows, err := s.db.QueryContext(r.Context(), `SELECT id FROM images ORDER BY id DESC LIMIT ? `, n)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	slog.Debug("Fetched ids", "ids", ids)
+
+	writeJSON(w, http.StatusOK, NewLatestImagesResponse(ids))
+
+	return nil
+}
+
+type UploadResponse struct {
+	ID string `json:"id"`
+}
+
+func NewUploadResponse(id uuid.UUID) UploadResponse {
+	return UploadResponse{ID: id.String()}
 }
 
 func (s *Server) handleUploads(w http.ResponseWriter, r *http.Request) error {
@@ -90,29 +147,30 @@ func (s *Server) handleUploads(w http.ResponseWriter, r *http.Request) error {
 	const limit = 1024 * 1024 * 10 //10MB
 	maxReader := http.MaxBytesReader(w, r.Body, limit)
 
+	//TODO: Only allow some mimetypes
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("content-type"))
+	if err != nil {
+		return NewApiError(http.StatusBadRequest, "invalid content type", err)
+	}
+
 	//TODO: duplicate checK? no since the same images can just be uplaoded again by someone in an insta clone.
 
 	id := uuid.NewV7()
 	filePath := filepath.Join(s.imageStorageDir, id.String())
 	file, err := os.Create(filePath)
 	if err != nil {
-		return fmt.Errorf("Failed to create file: %w", err)
+		return fmt.Errorf("failed to create file: %w", err)
 	}
 	defer file.Close()
 	slog.Debug("Created file", "Path", filePath)
 
 	n, err := io.Copy(file, maxReader)
 	if err != nil {
-		return NewApiError(http.StatusBadRequest, "upload failed", fmt.Errorf("Failed to copy bytes into file: %w", err))
+		return NewApiError(http.StatusBadRequest, "upload failed", fmt.Errorf("failed to copy bytes into file: %w", err))
 	}
 	slog.Debug("copied bytes into file", "bytes written", n)
 
 	file.Close()
-
-	mediaType, _, err := mime.ParseMediaType(r.Header.Get("content-type"))
-	if err != nil {
-		return NewApiError(http.StatusBadRequest, "invalid content type", err)
-	}
 
 	//abstract writes behind interface
 	_, err = s.db.ExecContext(r.Context(), `INSERT INTO images(id, image_type, uploaded_at) VALUES (?,?,?)`,
@@ -125,5 +183,6 @@ func (s *Server) handleUploads(w http.ResponseWriter, r *http.Request) error {
 	}
 	slog.Debug("Insert image into table", "id", id)
 
+	writeJSON(w, http.StatusCreated, NewUploadResponse(id))
 	return nil
 }

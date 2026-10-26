@@ -18,13 +18,13 @@
 - Errors MUST NOT leak internal details to api consumer
 - Assuming logs are secure and only viewable by trusted people, so interal details can be printed there
 
-## Endponits
+## Endpoints
 - `/uploads` - accepting uploads as specified by test document.
-- `/initial` - serves the initial set of images.
+- `/latest?limit=n` - serves the latest N images
 
 ## Storage
-- Fiels will be stored localy in a `file-storage` directory and named with a UUID. 
-- Images table will reference the fill. Still have to thing about only referencing by ID, or by full path.
+- Files will be stored locally in a `file-storage` directory and named with a UUID. 
+- Images table will reference the file. Still have to think about only referencing by ID, or by full path.
 ### DB
 - For initial development i will use SQLite for fast iteration and implementaion.
 - Later on i can switch to Postgres running in docker.

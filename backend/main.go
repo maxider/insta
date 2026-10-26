@@ -19,9 +19,6 @@ var schema string
 
 func migrate(db *sql.DB) error {
 	_, err := db.Exec(schema)
-	if err != nil {
-		log.Fatalln(err)
-	}
 	return err
 }
 
@@ -34,10 +31,12 @@ func main() {
 		log.Fatalln(err)
 	}
 	defer db.Close()
-	migrate(db)
+	if err := migrate(db); err != nil {
+		log.Fatal(err)
+	}
 
 	//TODO: pull from args/env/config and abstract behind interface.
-	const imageStorageDir = "./storage"
+	const imageStorageDir = "./file-storage"
 	const dirPerm fs.FileMode = 0o755
 	if err := os.MkdirAll(imageStorageDir, dirPerm); err != nil {
 		log.Fatalln(err)
@@ -54,6 +53,7 @@ func run(s *Server) error {
 	// - rate limiting middleware
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /uploads", handle(s.handleUploads))
+	mux.HandleFunc("GET /latest", handle(s.handleLatest))
 
 	server := http.Server{
 		Addr:              "localhost:8080",

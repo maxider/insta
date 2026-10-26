@@ -52,6 +52,11 @@ func run(s *Server) error {
 	//TODO: Add middleware
 	// - rate limiting middleware
 	mux := http.NewServeMux()
+
+	fs := http.FileServer(http.Dir("./file-storage"))
+
+	//make middleware compatible with http.Handler
+	mux.Handle("GET /images/", http.StripPrefix("/images/", fs))
 	mux.HandleFunc("POST /uploads", handle(s.handleUploads))
 	mux.HandleFunc("GET /latest", handle(s.handleLatest))
 

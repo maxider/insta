@@ -103,12 +103,12 @@ export function Feed() {
 
   return (
     <ul className="flex flex-col gap-3">
-      {data.map((name) => (
-        <li key={name}>
+      {data.map((id) => (
+        <li key={id}>
           <ImageCard
             title="some-title"
             tags={["foo", "bar"]}
-            imageName={name}
+            imageId={id}
           />
         </li>
       ))}
@@ -119,8 +119,8 @@ export function Feed() {
 async function getLatest(): Promise<string[]> {
   //timeout to show skelleton. Leaving zombie code in for demo purposes
   // await new Promise((f) => setTimeout(f, 2000));
-  const { data } = await axios.get<{ filenames: string[] }>("/api/latest");
-  return data.filenames;
+  const { data } = await axios.get<{ ids: string[] }>("/api/latest");
+  return data.ids;
 }
 
 export function UploadButton() {

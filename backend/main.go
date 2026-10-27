@@ -9,6 +9,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/maxider/insta/internal/fileblobstorage"
+
 	_ "embed"
 
 	_ "modernc.org/sqlite"
@@ -41,7 +43,10 @@ func main() {
 	if err := os.MkdirAll(imageStorageDir, dirPerm); err != nil {
 		log.Fatalln(err)
 	}
-	server := Server{db: db, imageStorageDir: imageStorageDir}
+	storage := fileblobstorage.FileBlobStorage{
+		Dir: imageStorageDir,
+	}
+	server := Server{db: db, blobStorage: &storage}
 
 	if err := run(&server); err != nil {
 		log.Fatalln(err)
@@ -53,10 +58,8 @@ func run(s *Server) error {
 	// - rate limiting middleware
 	mux := http.NewServeMux()
 
-	fs := http.FileServer(http.Dir("./file-storage"))
-
 	//make middleware compatible with http.Handler
-	mux.Handle("GET /images/", http.StripPrefix("/images/", fs))
+	mux.Handle("GET /images/{id}", handle(s.getImage))
 	mux.HandleFunc("POST /uploads", handle(s.handleUploads))
 	mux.HandleFunc("GET /latest", handle(s.handleLatest))
 

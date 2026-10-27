@@ -3,15 +3,15 @@ import { Card, CardHeader, CardTitle } from "./components/ui/card";
 import { Skeleton } from "./components/ui/skeleton";
 
 export function ImageCard({
-  imageName,
+  imageId,
   title,
   tags,
 }: {
-  imageName: string;
+  imageId: string;
   title: string;
   tags: string[];
 }) {
-  const imageUrl = `/images/${imageName}`;
+  const imageUrl = `/images/${imageId}`;
 
   return (
     <Card>

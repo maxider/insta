@@ -1,6 +1,7 @@
 import {
   QueryClient,
   QueryClientProvider,
+  useMutation,
   useQuery,
 } from "@tanstack/react-query";
 import "./App.css";
@@ -16,11 +17,21 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "./components/ui/dialog";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "./components/ui/field";
+import {
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "./components/ui/field";
 import { Input } from "./components/ui/input";
-import { TagsInput, TagsInputItem, TagsInputLabel, TagsInputList } from "./components/ui/tags-input";
+import {
+  TagsInput,
+  TagsInputItem,
+  TagsInputLabel,
+  TagsInputList,
+} from "./components/ui/tags-input";
 import { TagsInputInput } from "@diceui/tags-input";
-import { useState } from "react";
+
+import { useForm } from "@tanstack/react-form";
 
 export const PlusIcon = (props: React.SVGProps<SVGSVGElement>) => (
   <svg
@@ -105,11 +116,7 @@ export function Feed() {
     <ul className="flex flex-col gap-3">
       {data.map((id) => (
         <li key={id}>
-          <ImageCard
-            title="some-title"
-            tags={["foo", "bar"]}
-            imageId={id}
-          />
+          <ImageCard title="some-title" tags={["foo", "bar"]} imageId={id} />
         </li>
       ))}
     </ul>
@@ -124,51 +131,131 @@ async function getLatest(): Promise<string[]> {
 }
 
 export function UploadButton() {
-  const [tags,setTags] = useState([])
+  interface UploadFormArgs {
+    title: string;
+    tags: string[];
+    file: File;
+  }
+
+  const uploadMutation = useMutation({
+    mutationFn: async (value: UploadFormArgs) => {
+      await axios.postForm("api/uploads", value);
+    },
+  });
+
+  const form = useForm({
+    defaultValues: {
+      title: "",
+      tags: [] as string[],
+      file: null as File | null,
+    },
+    onSubmit: async ({ formApi, value }) => {
+      await uploadMutation.mutateAsync(value);
+      formApi.reset();
+    },
+  });
 
   return (
     <Dialog>
-      <form>
-        <DialogTrigger
-          render={
-            <Button size="icon-lg">
-              <PlusIcon />
-            </Button>
-          }
-        />
-        <DialogContent className="ms:max-w-sm">
+      <DialogTrigger
+        render={
+          <Button size="icon-lg">
+            <PlusIcon />
+          </Button>
+        }
+      />
+      <DialogContent className="ms:max-w-sm">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            form.handleSubmit();
+          }}
+        >
           <DialogHeader>
             <DialogTitle>Upload Image</DialogTitle>
             <DialogDescription>
               Upload an image with some tags.
             </DialogDescription>
           </DialogHeader>
-        <FieldGroup>
-          <Field>
-              <FieldLabel>Title</FieldLabel>
-              <FieldDescription>
-                The title of the image
-              </FieldDescription>
-              <Input id="title" type="text" placeholder="Title"></Input>
-            </Field>
-            <Field>
-              <FieldLabel>Tags</FieldLabel>
-              <FieldDescription>add tages to the image allow filtering by and add some flaire</FieldDescription>
-              <TagsInput value={tags} onValueChange={setTags} editable addOnPaste>
-                <TagsInputLabel>Tags</TagsInputLabel>
-                <TagsInputList>
-                  {tags.map((tag) => (
-                    <TagsInputItem key={tag} value={tag}>
-                      #{tag}
-                    </TagsInputItem>
-                  ))}
-                </TagsInputList>
-                <TagsInputInput placeholder="Add tags..."/>
-              </TagsInput>
-            </Field>
+          <FieldGroup>
+            <form.Field
+              name="title"
+              validators={{}}
+              children={(field) => (
+                <>
+                  <FieldLabel htmlFor={field.name}>Title</FieldLabel>
+                  <FieldDescription>The title of the image</FieldDescription>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    value={field.state.value}
+                    placeholder="Title"
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                </>
+              )}
+            />
+            <form.Field
+              name="tags"
+              validators={{}}
+              children={(field) => (
+                <>
+                  <FieldLabel>Tags</FieldLabel>
+                  <FieldDescription>
+                    add tages to the image allow filtering by and add some
+                    flaire
+                  </FieldDescription>
+                  <TagsInput
+                    className="w-full"
+                    value={field.state.value}
+                    onValueChange={field.handleChange}
+                    editable
+                    addOnPaste
+                  >
+                    <TagsInputLabel>Tags</TagsInputLabel>
+                    <TagsInputList>
+                      {field.state.value.map((tag) => (
+                        <TagsInputItem key={tag} value={tag}>
+                          #{tag}
+                        </TagsInputItem>
+                      ))}
+                    </TagsInputList>
+                    <TagsInputInput placeholder="Add tags..." />
+                  </TagsInput>
+                </>
+              )}
+            />
+            <form.Field
+              name="file"
+              children={(field) => (
+                <div>
+                  <Input
+                    type="file"
+                    onChange={(e) =>
+                      field.handleChange(e.target.files[0] ?? null)
+                    }
+                  />
+                  {field.state.value != null && (
+                    <p>
+                      {field.state.value.name} - Size:{" "}
+                      {Math.round(field.state.value.size / 1024)}Kb
+                    </p>
+                  )}
+                </div>
+              )}
+            />
+            <form.Subscribe
+              selector={(state) => [state.canSubmit]}
+              children={([canSubmit]) => (
+                <Button type="submit" disabled={!canSubmit}>
+                  Submit
+                </Button>
+              )}
+            />
           </FieldGroup>
-        </DialogContent>
-      </form>
+        </form>
+      </DialogContent>
     </Dialog>
   );
 }

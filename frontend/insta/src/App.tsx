@@ -115,20 +115,33 @@ export function Feed() {
 
   return (
     <ul className="flex flex-col gap-3">
-      {data.map((id) => (
-        <li key={id}>
-          <ImageCard title="some-title" tags={["foo", "bar"]} imageId={id} />
+      {data.map((e) => (
+        <li key={e.id}>
+          <ImageCard title={e.title} tags={e.tags} imageId={e.id} />
         </li>
       ))}
     </ul>
   );
 }
 
-async function getLatest(): Promise<string[]> {
+interface LatestResponseElement {
+  id: string;
+  title: string;
+  tags: string[];
+  filesize: number;
+  mimetype: string;
+  size_x: number;
+  size_y: number;
+  created_at: string; //TODO use correct type.
+}
+
+async function getLatest(): Promise<LatestResponseElement[]> {
   //timeout to show skelleton. Leaving zombie code in for demo purposes
   // await new Promise((f) => setTimeout(f, 2000));
-  const { data } = await axios.get<{ ids: string[] }>("/api/latest");
-  return data.ids;
+  const { data } = await axios.get<{ metadata: LatestResponseElement[] }>(
+    "/api/latest",
+  );
+  return data.metadata;
 }
 
 export function UploadButton() {
@@ -142,7 +155,11 @@ export function UploadButton() {
 
   const uploadMutation = useMutation({
     mutationFn: async (value: UploadFormArgs) => {
-      await axios.postForm("api/uploads", value);
+      await axios.postForm("api/uploads", {
+        title: value.title,
+        tags: value.tags.join(","),
+        file: value.file
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["feed"] });

@@ -20,7 +20,7 @@ export function ImageCard({
         <CardTitle>{title}</CardTitle>
         <div className="flex flex-row gap-1">
           {tags.map((t) => (
-            <TagBubble title={t} />
+            <TagBubble title={t} key={`${imageUrl}-${t}`} />
           ))}
         </div>
       </CardHeader>

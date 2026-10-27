@@ -142,6 +142,15 @@ func (server *Server) HandleLatest(w http.ResponseWriter, r *http.Request) error
 		}
 	}
 
+	//unused filter fetching. leaving this in as it's ready to use once SQL querry is ready.
+	// filters := make([]string, 0)
+	// if filterParam := r.URL.Query().Get("filter"); filterParam != "" {
+	// 	filters = strings.Split(filterParam, ",")
+	// }
+	// sort.Slice(filters, func(i, j int) bool {
+	// 	return i > j
+	// })
+
 	// we can use uuid since they are v7
 	rows, err := server.Db.QueryContext(r.Context(), `
 		SELECT id, title, filesize, mime_type, size_x, size_y, created_at, group_concat(j.tag_name) FROM image_data AS image

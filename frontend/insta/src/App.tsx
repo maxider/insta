@@ -3,6 +3,7 @@ import {
   QueryClientProvider,
   useMutation,
   useQuery,
+  useQueryClient,
 } from "@tanstack/react-query";
 import "./App.css";
 import axios from "axios";
@@ -105,7 +106,7 @@ export function TopBar() {
 
 export function Feed() {
   const { isPending, isError, data, error } = useQuery({
-    queryKey: ["latest"],
+    queryKey: ["feed"],
     queryFn: getLatest,
   });
 
@@ -137,9 +138,14 @@ export function UploadButton() {
     file: File;
   }
 
+  const queryClient = useQueryClient();
+
   const uploadMutation = useMutation({
     mutationFn: async (value: UploadFormArgs) => {
       await axios.postForm("api/uploads", value);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["feed"] });
     },
   });
 

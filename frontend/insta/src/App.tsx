@@ -11,10 +11,21 @@ import { ImageCard, SkeletonCardList } from "./Card";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
   DialogTrigger,
 } from "./components/ui/dialog";
 
 import { UploadForm } from "./UploadForm";
+import {
+  TagsInput,
+  TagsInputInput,
+  TagsInputItem,
+  TagsInputLabel,
+  TagsInputList,
+} from "./components/ui/tags-input";
+import { useState, type Dispatch, type SetStateAction } from "react";
 
 export const PlusIcon = (props: React.SVGProps<SVGSVGElement>) => (
   <svg
@@ -57,19 +68,19 @@ declare global {
 window.__TANSTACK_QUERY_CLIENT__ = queryClient;
 
 function App() {
+  const [filter, setFilter] = useState([] as string[]);
+
   return (
     <QueryClientProvider client={queryClient}>
       <div className="m-4">
         <div className="fixed top-0 mt-4">
           <div className="flex flex-col">
             <UploadButton />
-            <Button size="icon-lg">
-              <TagsIcon />
-            </Button>
+            <TagsFilterButton filter={filter} setFilter={setFilter} />
           </div>
         </div>
         <div className="m-5 mx-auto w-full max-w-xl">
-          <Feed />
+          <Feed tagsFilter={filter} />
         </div>
       </div>
     </QueryClientProvider>
@@ -86,10 +97,10 @@ export function TopBar() {
   return <div className="w-full h-10 border-b-2"></div>;
 }
 
-export function Feed() {
+export function Feed({ tagsFilter }: { tagsFilter: string[] }) {
   const { isPending, isError, data, error } = useQuery({
-    queryKey: ["feed"],
-    queryFn: getLatest,
+    queryKey: ["feed", { filter: [...new Set(tagsFilter)].sort() }],
+    queryFn: () => getLatest(tagsFilter),
   });
 
   if (isPending) return <SkeletonCardList n={20} />;
@@ -117,11 +128,11 @@ interface LatestResponseElement {
   created_at: string; //TODO use correct type.
 }
 
-async function getLatest(): Promise<LatestResponseElement[]> {
+async function getLatest(filter: string[]): Promise<LatestResponseElement[]> {
   //timeout to show skelleton. Leaving zombie code in for demo purposes
   // await new Promise((f) => setTimeout(f, 2000));
   const { data } = await axios.get<{ metadata: LatestResponseElement[] }>(
-    "/api/latest",
+    `/api/latest?filter=${filter.join(",")}`,
   );
   return data.metadata;
 }
@@ -138,6 +149,49 @@ export function UploadButton() {
       />
       <DialogContent className="ms:max-w-sm">
         <UploadForm />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function TagsFilterButton({
+  filter,
+  setFilter,
+}: {
+  filter: string[];
+  setFilter: Dispatch<SetStateAction<string[]>>;
+}) {
+  return (
+    <Dialog>
+      <DialogTrigger
+        render={
+          <Button size="icon-lg">
+            <TagsIcon />
+          </Button>
+        }
+      />
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Tag filter</DialogTitle>
+          <DialogDescription>Filter images by tags</DialogDescription>
+        </DialogHeader>
+        <TagsInput
+          className="w-full"
+          value={filter}
+          onValueChange={setFilter}
+          editable
+          addOnPaste
+        >
+          <TagsInputLabel>Tags</TagsInputLabel>
+          <TagsInputList>
+            {filter.map((f) => (
+              <TagsInputItem key={f} value={f}>
+                #{f}
+              </TagsInputItem>
+            ))}
+          </TagsInputList>
+          <TagsInputInput placeholder="Add tags..." />
+        </TagsInput>
       </DialogContent>
     </Dialog>
   );

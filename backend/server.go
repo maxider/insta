@@ -144,32 +144,38 @@ var allowedExtensions = map[string]string{
 	"image/webp": ".webp",
 }
 
-func (s *Server) handleUploads(w http.ResponseWriter, r *http.Request) error {
+func parseMimeType(mediatype string) (string, error) {
+	mediaType, _, err := mime.ParseMediaType(mediatype)
+	if err != nil {
+		return "", NewApiError(http.StatusBadRequest, "invalid content type", err)
+	}
+	ext, ok := allowedExtensions[mediaType]
+	if !ok {
+		return "", NewApiError(http.StatusUnsupportedMediaType, "unsuported media type", nil)
+	}
+
+	return ext, nil
+}
+
+func (server *Server) handleUploads(w http.ResponseWriter, r *http.Request) error {
 	//TODO: Allow for multipart
 	const limit = 1024 * 1024 * 10 //10MB
 	maxReader := http.MaxBytesReader(w, r.Body, limit)
 
-	//TODO: Only allow some mimetypes
-	mediaType, _, err := mime.ParseMediaType(r.Header.Get("content-type"))
+	ext, err := parseMimeType(r.Header.Get("content-type"))
 	if err != nil {
-		return NewApiError(http.StatusBadRequest, "invalid content type", err)
-	}
-	ext, ok := allowedExtensions[mediaType]
-	if !ok {
-		return NewApiError(http.StatusUnsupportedMediaType, "unsuported media type", nil)
+		return fmt.Errorf("failed to parse mime type %w", err)
 	}
 
 	//TODO: duplicate checK? no since the same images can just be uplaoded again by someone in an insta clone.
 
 	id := uuid.NewV7()
-	fileName := id.String() + ext
-	filePath := filepath.Join(s.imageStorageDir, fileName)
-	file, err := os.Create(filePath)
+	file, err := createFile(id, ext, server)
 	if err != nil {
 		return fmt.Errorf("failed to create file: %w", err)
 	}
 	defer file.Close()
-	slog.Debug("Created file", "Path", filePath)
+	slog.Debug("Created file", "Path", file.Name())
 
 	n, err := io.Copy(file, maxReader)
 	if err != nil {
@@ -179,17 +185,32 @@ func (s *Server) handleUploads(w http.ResponseWriter, r *http.Request) error {
 
 	file.Close()
 
-	//abstract writes behind interface
-	_, err = s.db.ExecContext(r.Context(), `INSERT INTO images(id, filename, uploaded_at) VALUES (?,?,?)`,
-		id, fileName, time.Now())
+	//TODO: abstract writes behind interface
+	err = insertImageInDb(server, r, id, file)
+	if err != nil {
+		return err
+	}
+	slog.Debug("Insert image into table", "id", id)
+
+	writeJSON(w, http.StatusCreated, NewUploadResponse(id))
+	return nil
+}
+
+func insertImageInDb(server *Server, r *http.Request, id uuid.UUID, file *os.File) error {
+	_, err := server.db.ExecContext(r.Context(), `INSERT INTO images(id, filename, uploaded_at) VALUES (?,?,?)`,
+		id, file.Name(), time.Now())
 	if err != nil {
 		if err := os.Remove(file.Name()); err != nil {
 			slog.Error("Failed to delete file wich was already created", "err", err)
 		}
 		return fmt.Errorf("failed to insert image info into DB: %w", err)
 	}
-	slog.Debug("Insert image into table", "id", id)
-
-	writeJSON(w, http.StatusCreated, NewUploadResponse(id))
 	return nil
+}
+
+func createFile(id uuid.UUID, ext string, s *Server) (*os.File, error) {
+	fileName := id.String() + ext
+	filePath := filepath.Join(s.imageStorageDir, fileName)
+	file, err := os.Create(filePath)
+	return file, err
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/lmittmann/tint"
 	"github.com/maxider/insta/internal/fileblobstorage"
 
 	_ "embed"
@@ -25,7 +26,7 @@ func migrate(db *sql.DB) error {
 }
 
 func main() {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	logger := slog.New(tint.NewTextHandler(os.Stderr, &tint.Options{Level: slog.LevelDebug}))
 	slog.SetDefault(logger)
 
 	db, err := sql.Open("sqlite", "db.db")

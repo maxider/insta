@@ -232,6 +232,7 @@ func (server *Server) HandleUploads(w http.ResponseWriter, r *http.Request) erro
 	//TODO: use extension
 	_, err = parseMimeType(result.ContentType)
 	if err != nil {
+		//TODO: check for invlaid mimetypes before and return bad request instead of error.
 		return fmt.Errorf("failed to parse mime type %w", err)
 	}
 

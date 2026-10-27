@@ -11,6 +11,7 @@ import (
 
 	"github.com/lmittmann/tint"
 	"github.com/maxider/insta/internal/fileblobstorage"
+	"github.com/maxider/insta/internal/server"
 
 	_ "embed"
 
@@ -47,22 +48,22 @@ func main() {
 	storage := fileblobstorage.FileBlobStorage{
 		Dir: imageStorageDir,
 	}
-	server := Server{db: db, blobStorage: &storage}
+	server := server.Server{Db: db, BlobStorage: &storage}
 
 	if err := run(&server); err != nil {
 		log.Fatalln(err)
 	}
 }
 
-func run(s *Server) error {
+func run(s *server.Server) error {
 	//TODO: Add middleware
 	// - rate limiting middleware
 	mux := http.NewServeMux()
 
 	//make middleware compatible with http.Handler
-	mux.Handle("GET /images/{id}", handle(s.getImage))
-	mux.HandleFunc("POST /uploads", handle(s.handleUploads))
-	mux.HandleFunc("GET /latest", handle(s.handleLatest))
+	mux.Handle("GET /images/{id}", server.Handle(s.GetImage))
+	mux.HandleFunc("POST /uploads", server.Handle(s.HandleUploads))
+	mux.HandleFunc("GET /latest", server.Handle(s.HandleLatest))
 
 	server := http.Server{
 		Addr:              "localhost:8080",

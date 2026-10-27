@@ -16,7 +16,7 @@ func TestImageStoring(t *testing.T) {
 	rand.Read(buff)
 
 	id := uuid.NewV7()
-	err := store.StoreImage(id, bytes.NewReader(buff))
+	_, err := store.StoreImage(id, bytes.NewReader(buff))
 	if err != nil {
 		t.Fatal()
 	}

@@ -1,7 +1,8 @@
-package main
+package server
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -42,13 +43,13 @@ func (e *APIError) Error() string {
 func (e *APIError) Unwrap() error { return e.Err }
 
 type Server struct {
-	db          *sql.DB
-	blobStorage ImageBlobStore
+	Db          *sql.DB
+	BlobStorage ImageBlobStore
 }
 
 type handleFunc func(w http.ResponseWriter, r *http.Request) error
 
-func handle(h handleFunc) http.HandlerFunc {
+func Handle(h handleFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		err := h(w, r)
@@ -88,20 +89,51 @@ func writeJSON(w http.ResponseWriter, code int, v any) error {
 }
 
 type LatestImagesResponse struct {
-	Ids []string `json:"ids"`
+	Metadata []ImageMetadataResponse `json:"metadata"`
 }
 
-func NewLatestImagesResponse(uuids []uuid.UUID) LatestImagesResponse {
-	ids := make([]string, len(uuids))
-	for i, id := range uuids {
-		ids[i] = id.String()
+func NewLatestImagesResponse(metadata []ImageMetadata) LatestImagesResponse {
+	resp := make([]ImageMetadataResponse, len(metadata))
+	for i, m := range metadata {
+		resp[i] = ImageMetadataResponse{
+			Id:         m.Id.String(),
+			Title:      m.Title,
+			Tags:       m.Tags,
+			Filesize:   m.Filesize,
+			MimeType:   m.MimeType,
+			Size_x:     m.Size_x,
+			Size_y:     m.Size_y,
+			Created_at: m.Created_at,
+		}
 	}
 	return LatestImagesResponse{
-		Ids: ids,
+		Metadata: resp,
 	}
 }
 
-func (server *Server) handleLatest(w http.ResponseWriter, r *http.Request) error {
+type ImageMetadata struct {
+	Id         uuid.UUID
+	Title      string
+	Tags       []string
+	Filesize   int64 //in bytes
+	MimeType   string
+	Size_x     uint16
+	Size_y     uint16
+	Created_at time.Time
+}
+
+type ImageMetadataResponse struct {
+	Id         string    `json:"id"`
+	Title      string    `json:"title"`
+	Tags       []string  `json:"tags"`
+	Filesize   int64     `json:"filesize"` //in bytes
+	MimeType   string    `json:"mimetyp"`
+	Size_x     uint16    `json:"size_x"`
+	Size_y     uint16    `json:"size_y"`
+	Created_at time.Time `json:"created_at"`
+}
+
+func (server *Server) HandleLatest(w http.ResponseWriter, r *http.Request) error {
 	const limit = 20
 	n := limit
 	if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
@@ -111,26 +143,48 @@ func (server *Server) handleLatest(w http.ResponseWriter, r *http.Request) error
 	}
 
 	// we can use uuid since they are v7
-	rows, err := server.db.QueryContext(r.Context(), `SELECT id FROM images ORDER BY id DESC LIMIT ? `, n)
+	rows, err := server.Db.QueryContext(r.Context(), `
+		SELECT id, title, filesize, mime_type, size_x, size_y, created_at, group_concat(j.tag_name) FROM image_data AS image
+			    LEFT JOIN image_tags AS j ON image.id = j.image_id
+				GROUP BY image.id
+			    ORDER BY image.id DESC LIMIT ?
+		`, n)
 	if err != nil {
 		return fmt.Errorf("error retriving latest: %w", err)
 	}
 	defer rows.Close()
 
-	ids := make([]uuid.UUID, 0)
+	metadata := make([]ImageMetadata, 0)
 	for rows.Next() {
 		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
+		var title string
+		var filesize int
+		var mime_type string
+		var size_x int
+		var size_y int
+		var create_at time.Time
+		var tags_unparsed string
+		if err := rows.Scan(&id, &title, &filesize, &mime_type, &size_x, &size_y, &create_at, &tags_unparsed); err != nil {
 			return err
 		}
-		ids = append(ids, id)
+
+		metadata = append(metadata, ImageMetadata{
+			Id:         id,
+			Title:      title,
+			Tags:       strings.Split(tags_unparsed, ","),
+			Filesize:   int64(filesize),
+			MimeType:   mime_type,
+			Size_x:     uint16(size_x),
+			Size_y:     uint16(size_y),
+			Created_at: create_at,
+		})
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	slog.Debug("Fetched image ids", "ids", ids)
+	slog.Debug("Fetched image metadata", "metadata", metadata)
 
-	writeJSON(w, http.StatusOK, NewLatestImagesResponse(ids))
+	writeJSON(w, http.StatusOK, NewLatestImagesResponse(metadata))
 
 	return nil
 }
@@ -162,7 +216,7 @@ func parseMimeType(mediatype string) (string, error) {
 	return ext, nil
 }
 
-func (server *Server) handleUploads(w http.ResponseWriter, r *http.Request) error {
+func (server *Server) HandleUploads(w http.ResponseWriter, r *http.Request) error {
 	const limit = 1024 * 1024 * 10 //10MB
 	r.Body = http.MaxBytesReader(w, r.Body, limit)
 
@@ -184,14 +238,25 @@ func (server *Server) handleUploads(w http.ResponseWriter, r *http.Request) erro
 	//TODO: duplicate checK? no since the same images can just be uplaoded again by someone in an insta clone.
 
 	id := uuid.NewV7()
-	if err = server.blobStorage.StoreImage(id, bytes.NewReader(result.ImageBytes)); err != nil {
+	fileMetadata, err := server.BlobStorage.StoreImage(id, bytes.NewReader(result.ImageBytes))
+	if err != nil {
 		//TODO: check from error if bad request or internal server error
 		return fmt.Errorf("error storing image: %w", err)
 	}
-	slog.Debug("Created file in blob storage", "id", id)
+	slog.Debug("Created file in blob storage", "metadata", fileMetadata)
 
+	imageMetadata := ImageMetadata{
+		Id:         id,
+		Title:      result.Title,
+		Tags:       result.Tags,
+		Filesize:   fileMetadata.Filesize,
+		MimeType:   result.ContentType,
+		Size_x:     0,          //TODO
+		Size_y:     0,          //TODO
+		Created_at: time.Now(), //Maybe write this only in the DB
+	}
 	//TODO: abstract writes behind interface
-	err = insertImageInDb(server.db, r, id, result.Title)
+	err = insertImageInDb(server.Db, r.Context(), imageMetadata)
 	if err != nil {
 		return err
 	}
@@ -264,13 +329,13 @@ func readPart(p *multipart.Part) (string, error) {
 	return string(content), nil
 }
 
-func (server *Server) getImage(w http.ResponseWriter, r *http.Request) error {
+func (server *Server) GetImage(w http.ResponseWriter, r *http.Request) error {
 	id := r.PathValue("id")
 	uuid, err := uuid.Parse(id)
 	if err != nil {
 		return NewApiError(http.StatusNotFound, "no image with this id", errors.New("failed to parse param id into uuid"))
 	}
-	reader, err := server.blobStorage.GetImageBlob(uuid)
+	reader, err := server.BlobStorage.GetImageBlob(uuid)
 	if err != nil {
 		return fmt.Errorf("failed to get image blob: %w", err)
 	}
@@ -279,25 +344,57 @@ func (server *Server) getImage(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func insertImageInDb(db *sql.DB, r *http.Request, id uuid.UUID, title string) error {
-	_, err := db.ExecContext(r.Context(), `INSERT INTO images(id, title, uploaded_at) VALUES (?,?,?)`,
-		id, title, time.Now())
+func insertImageInDb(db *sql.DB, ctx context.Context, imageMetadata ImageMetadata) error {
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create transation: %w", err)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO image_data(id, title, filesize, mime_type, size_x, size_y, created_at) VALUES (?,?,?,?,?,?,?)
+		`,
+		imageMetadata.Id, imageMetadata.Title, imageMetadata.Filesize, imageMetadata.MimeType, imageMetadata.Size_x, imageMetadata.Size_y, imageMetadata.Created_at)
 	if err != nil {
 		return fmt.Errorf("error inserting image data in db: %w", err)
 	}
 
-	return nil
-}
+	tagStmt, err := tx.PrepareContext(ctx,
+		`INSERT INTO tags(name, created_at) VALUES (?, ?) ON CONFLICT(name) DO NOTHING`)
+	if err != nil {
+		return fmt.Errorf("preparing tag insert: %w", err)
+	}
+	defer tagStmt.Close()
 
-type ImageData struct {
-	id        uuid.UUID
-	title     string
-	extension string
-	createdAt time.Time
+	linkStmt, err := tx.PrepareContext(ctx,
+		`INSERT INTO image_tags(image_id, tag_name) VALUES (?, ?) ON CONFLICT DO NOTHING`)
+	if err != nil {
+		return fmt.Errorf("preparing image_tags insert: %w", err)
+	}
+	defer linkStmt.Close()
+
+	now := time.Now()
+	for _, t := range imageMetadata.Tags {
+		if _, err := tagStmt.ExecContext(ctx, t, now); err != nil {
+			return fmt.Errorf("inserting tag %q: %w", t, err)
+		}
+		if _, err := linkStmt.ExecContext(ctx, imageMetadata.Id, t); err != nil {
+			return fmt.Errorf("linking tag %q: %w", t, err)
+		}
+	}
+
+	tx.Commit()
+	return nil
 }
 
 type ImageBlobStore interface {
 	GetImageBlob(id uuid.UUID) (io.ReadSeeker, error)
-	StoreImage(id uuid.UUID, rc io.Reader) error
+	StoreImage(id uuid.UUID, rc io.Reader) (*FileMetadata, error)
 	DeleteImage(id uuid.UUID)
+}
+
+type FileMetadata struct {
+	Id       uuid.UUID
+	Filesize int64
 }

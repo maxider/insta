@@ -29,7 +29,6 @@
 - For initial development i will use SQLite for fast iteration and implementaion.
 - Later on i can switch to Postgres running in docker.
 - Why not MongoDB / NoSQL? Few well defined things have to be stored in the DB + im more familiar with Relational DBs
-- 
 
 # Project Structure
 - Copy `.pdf` into `.md` since Zed can view `.md`

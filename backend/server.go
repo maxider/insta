@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -8,8 +9,10 @@ import (
 	"io"
 	"log/slog"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 	"uuid"
 )
@@ -160,12 +163,20 @@ func parseMimeType(mediatype string) (string, error) {
 }
 
 func (server *Server) handleUploads(w http.ResponseWriter, r *http.Request) error {
-	//TODO: Allow for multipart
 	const limit = 1024 * 1024 * 10 //10MB
-	maxReader := http.MaxBytesReader(w, r.Body, limit)
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+
+	reader, err := r.MultipartReader()
+	if err != nil {
+		return err
+	}
+	result, err := extractParts(reader)
+	if err != nil {
+		return err
+	}
 
 	//TODO: use extension
-	_, err := parseMimeType(r.Header.Get("content-type"))
+	_, err = parseMimeType(result.ContentType)
 	if err != nil {
 		return fmt.Errorf("failed to parse mime type %w", err)
 	}
@@ -173,14 +184,14 @@ func (server *Server) handleUploads(w http.ResponseWriter, r *http.Request) erro
 	//TODO: duplicate checK? no since the same images can just be uplaoded again by someone in an insta clone.
 
 	id := uuid.NewV7()
-	if err = server.blobStorage.StoreImage(id, maxReader); err != nil {
+	if err = server.blobStorage.StoreImage(id, bytes.NewReader(result.ImageBytes)); err != nil {
 		//TODO: check from error if bad request or internal server error
 		return fmt.Errorf("error storing image: %w", err)
 	}
 	slog.Debug("Created file in blob storage", "id", id)
 
 	//TODO: abstract writes behind interface
-	err = insertImageInDb(server.db, r, id, "TODO")
+	err = insertImageInDb(server.db, r, id, result.Title)
 	if err != nil {
 		return err
 	}
@@ -188,6 +199,69 @@ func (server *Server) handleUploads(w http.ResponseWriter, r *http.Request) erro
 
 	writeJSON(w, http.StatusCreated, NewUploadResponse(id))
 	return nil
+}
+
+type PartsResult struct {
+	Title       string
+	Tags        []string
+	ImageBytes  []byte
+	ContentType string
+}
+
+func extractParts(reader *multipart.Reader) (*PartsResult, error) {
+	var title string
+	var tags []string
+	var imageBytes []byte
+	var contentType string
+	for {
+		part, err := reader.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to read part: %w", err)
+		}
+		switch part.FormName() {
+		case "title":
+			{
+				title, err = readPart(part)
+				if err != nil {
+					return nil, err
+				}
+			}
+		case "tags":
+			{
+				tags_unparsed, err := readPart(part)
+				if err != nil {
+					return nil, err
+				}
+				tags = strings.Split(tags_unparsed, ",")
+			}
+		case "file":
+			{
+				slog.Debug("file")
+				imageBytes, err = io.ReadAll(part)
+				if err != nil {
+					return nil, err
+				}
+				contentType = part.Header.Get("content-type")
+			}
+		}
+	}
+	return &PartsResult{
+		Title:       title,
+		Tags:        tags,
+		ImageBytes:  imageBytes,
+		ContentType: contentType,
+	}, nil
+}
+
+func readPart(p *multipart.Part) (string, error) {
+	content, err := io.ReadAll(p)
+	if err != nil {
+		return "", err
+	}
+	return string(content), nil
 }
 
 func (server *Server) getImage(w http.ResponseWriter, r *http.Request) error {

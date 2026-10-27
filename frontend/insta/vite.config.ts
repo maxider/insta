@@ -10,6 +10,7 @@ export default defineConfig({
     proxy: {
       "/api": {
         target: "http://localhost:8080",
+        ws: true,
         rewrite: (path) => path.replace(/^\/api/, '')
       },
       "/images": "http://localhost:8080"

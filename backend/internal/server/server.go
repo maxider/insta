@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 	"uuid"
+
+	"github.com/coder/websocket"
 )
 
 type APIError struct {
@@ -43,8 +45,9 @@ func (e *APIError) Error() string {
 func (e *APIError) Unwrap() error { return e.Err }
 
 type Server struct {
-	Db          *sql.DB
-	BlobStorage ImageBlobStore
+	Db           *sql.DB
+	BlobStorage  ImageBlobStore
+	ImageChannel chan ImageMetadataResponse
 }
 
 type handleFunc func(w http.ResponseWriter, r *http.Request) error
@@ -133,7 +136,20 @@ type ImageMetadataResponse struct {
 	Created_at time.Time `json:"created_at"`
 }
 
-func (server *Server) HandleLatest(w http.ResponseWriter, r *http.Request) error {
+func newImageMetadataResponse(m ImageMetadata) ImageMetadataResponse {
+	return ImageMetadataResponse{
+		Id:         m.Id.String(),
+		Title:      m.Title,
+		Tags:       m.Tags,
+		Filesize:   m.Filesize,
+		MimeType:   m.MimeType,
+		Size_x:     m.Size_x,
+		Size_y:     m.Size_y,
+		Created_at: m.Created_at,
+	}
+}
+
+func (s *Server) HandleLatest(w http.ResponseWriter, r *http.Request) error {
 	const limit = 20
 	n := limit
 	if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
@@ -152,7 +168,7 @@ func (server *Server) HandleLatest(w http.ResponseWriter, r *http.Request) error
 	// })
 
 	// we can use uuid since they are v7
-	rows, err := server.Db.QueryContext(r.Context(), `
+	rows, err := s.Db.QueryContext(r.Context(), `
 		SELECT id, title, filesize, mime_type, size_x, size_y, created_at, group_concat(j.tag_name) FROM image_data AS image
 			    LEFT JOIN image_tags AS j ON image.id = j.image_id
 				GROUP BY image.id
@@ -198,6 +214,55 @@ func (server *Server) HandleLatest(w http.ResponseWriter, r *http.Request) error
 	return nil
 }
 
+func (s *Server) HandleWebsocket(w http.ResponseWriter, r *http.Request) {
+	slog.Debug("handlewebsocket")
+	c, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		panic(err)
+	}
+	defer c.CloseNow()
+
+	readCh := make(chan string)
+
+	go func() {
+		for {
+			msgType, content, err := c.Read(context.Background())
+			slog.Debug("read loop", "msgType", msgType, "content", content, "err", err)
+			if err != nil {
+				return
+			}
+			readCh <- string(content)
+		}
+	}()
+
+	timer := time.NewTimer(5 * time.Second)
+
+	for {
+		select {
+		case msg := <-readCh:
+			{
+				slog.Debug("select reach msg", "msg", msg)
+			}
+		case <-timer.C:
+			{
+				c.Write(context.Background(), websocket.MessageText, []byte("ping from loop"))
+			}
+		case msg := <-s.ImageChannel:
+			{
+				slog.Debug("select image channel", "msg", msg)
+				json, err := json.Marshal(msg)
+				if err != nil {
+					slog.Error("image channel case json bad happend", "err", err)
+				}
+				err = c.Write(context.Background(), websocket.MessageText, json)
+				if err != nil {
+					slog.Error("image channel case during write something happend", "err", err)
+				}
+			}
+		}
+	}
+}
+
 type UploadResponse struct {
 	ID string `json:"id"`
 }
@@ -225,7 +290,7 @@ func parseMimeType(mediatype string) (string, error) {
 	return ext, nil
 }
 
-func (server *Server) HandleUploads(w http.ResponseWriter, r *http.Request) error {
+func (s *Server) HandleUploads(w http.ResponseWriter, r *http.Request) error {
 	const limit = 1024 * 1024 * 10 //10MB
 	r.Body = http.MaxBytesReader(w, r.Body, limit)
 
@@ -248,7 +313,7 @@ func (server *Server) HandleUploads(w http.ResponseWriter, r *http.Request) erro
 	//TODO: duplicate checK? no since the same images can just be uplaoded again by someone in an insta clone.
 
 	id := uuid.NewV7()
-	fileMetadata, err := server.BlobStorage.StoreImage(id, bytes.NewReader(result.ImageBytes))
+	fileMetadata, err := s.BlobStorage.StoreImage(id, bytes.NewReader(result.ImageBytes))
 	if err != nil {
 		//TODO: check from error if bad request or internal server error
 		return fmt.Errorf("error storing image: %w", err)
@@ -266,12 +331,13 @@ func (server *Server) HandleUploads(w http.ResponseWriter, r *http.Request) erro
 		Created_at: time.Now(), //Maybe write this only in the DB
 	}
 	//TODO: abstract writes behind interface
-	err = insertImageInDb(server.Db, r.Context(), imageMetadata)
+	err = insertImageInDb(s.Db, r.Context(), imageMetadata)
 	if err != nil {
 		return err
 	}
 	slog.Debug("Insert image into table", "id", id)
 
+	s.ImageChannel <- newImageMetadataResponse(imageMetadata)
 	writeJSON(w, http.StatusCreated, NewUploadResponse(id))
 	return nil
 }
@@ -339,13 +405,13 @@ func readPart(p *multipart.Part) (string, error) {
 	return string(content), nil
 }
 
-func (server *Server) GetImage(w http.ResponseWriter, r *http.Request) error {
+func (s *Server) GetImage(w http.ResponseWriter, r *http.Request) error {
 	id := r.PathValue("id")
 	uuid, err := uuid.Parse(id)
 	if err != nil {
 		return NewApiError(http.StatusNotFound, "no image with this id", errors.New("failed to parse param id into uuid"))
 	}
-	reader, err := server.BlobStorage.GetImageBlob(uuid)
+	reader, err := s.BlobStorage.GetImageBlob(uuid)
 	if err != nil {
 		return fmt.Errorf("failed to get image blob: %w", err)
 	}

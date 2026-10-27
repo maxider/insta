@@ -25,7 +25,10 @@ import {
   TagsInputLabel,
   TagsInputList,
 } from "./components/ui/tags-input";
-import { useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+//https://github.com/robtaussig/react-use-websocket/issues/280
+import { useWebSocket } from "react-use-websocket/dist/lib/use-websocket";
+// const useWebSocket = (useWebSocketModule as unknown as { default: typeof useWebSocketModule }).default;
 
 export const PlusIcon = (props: React.SVGProps<SVGSVGElement>) => (
   <svg
@@ -69,6 +72,15 @@ window.__TANSTACK_QUERY_CLIENT__ = queryClient;
 
 function App() {
   const [filter, setFilter] = useState([] as string[]);
+  const [messageHistory, setMessageHistory] = useState<MessageEvent<any>[]>([]);
+
+  const { lastMessage, readyState } = useWebSocket("api/socket");
+
+  useEffect(() => {
+    if (lastMessage !== null) {
+      setMessageHistory((prev) => prev.concat(lastMessage));
+    }
+  }, [lastMessage]);
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -76,6 +88,10 @@ function App() {
         <div className="fixed top-0 mt-4">
           <div className="flex flex-col">
             <UploadButton />
+            <p>ready: {readyState}</p>
+            {messageHistory.map((m) => (
+              <p>{m.data}</p>
+            ))}
             <TagsFilterButton filter={filter} setFilter={setFilter} />
           </div>
         </div>

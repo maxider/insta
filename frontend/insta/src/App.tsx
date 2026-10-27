@@ -7,7 +7,20 @@ import "./App.css";
 import axios from "axios";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
-import { ImageCard, SkeletonCard, SkeletonCardList } from "./Card";
+import { ImageCard, SkeletonCardList } from "./Card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "./components/ui/dialog";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "./components/ui/field";
+import { Input } from "./components/ui/input";
+import { TagsInput, TagsInputItem, TagsInputLabel, TagsInputList } from "./components/ui/tags-input";
+import { TagsInputInput } from "@diceui/tags-input";
+import { useState } from "react";
 
 export const PlusIcon = (props: React.SVGProps<SVGSVGElement>) => (
   <svg
@@ -55,9 +68,7 @@ function App() {
       <div className="m-4">
         <div className="fixed top-0 mt-4">
           <div className="flex flex-col">
-            <Button size="icon-lg">
-              <PlusIcon />
-            </Button>
+            <UploadButton />
             <Button size="icon-lg">
               <TagsIcon />
             </Button>
@@ -110,4 +121,54 @@ async function getLatest(): Promise<string[]> {
   // await new Promise((f) => setTimeout(f, 2000));
   const { data } = await axios.get<{ filenames: string[] }>("/api/latest");
   return data.filenames;
+}
+
+export function UploadButton() {
+  const [tags,setTags] = useState([])
+
+  return (
+    <Dialog>
+      <form>
+        <DialogTrigger
+          render={
+            <Button size="icon-lg">
+              <PlusIcon />
+            </Button>
+          }
+        />
+        <DialogContent className="ms:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Upload Image</DialogTitle>
+            <DialogDescription>
+              Upload an image with some tags.
+            </DialogDescription>
+          </DialogHeader>
+        <FieldGroup>
+          <Field>
+              <FieldLabel>Title</FieldLabel>
+              <FieldDescription>
+                The title of the image
+              </FieldDescription>
+              <Input id="title" type="text" placeholder="Title"></Input>
+            </Field>
+            <Field>
+              <FieldLabel>Tags</FieldLabel>
+              <FieldDescription>add tages to the image allow filtering by and add some flaire</FieldDescription>
+              <TagsInput value={tags} onValueChange={setTags} editable addOnPaste>
+                <TagsInputLabel>Tags</TagsInputLabel>
+                <TagsInputList>
+                  {tags.map((tag) => (
+                    <TagsInputItem key={tag} value={tag}>
+                      #{tag}
+                    </TagsInputItem>
+                  ))}
+                </TagsInputList>
+                <TagsInputInput placeholder="Add tags..."/>
+              </TagsInput>
+            </Field>
+          </FieldGroup>
+        </DialogContent>
+      </form>
+    </Dialog>
+  );
 }

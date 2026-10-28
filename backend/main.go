@@ -30,7 +30,10 @@ func main() {
 	logger := slog.New(tint.NewTextHandler(os.Stderr, &tint.Options{Level: slog.LevelDebug}))
 	slog.SetDefault(logger)
 
-	host := os.Args[1]
+	host := "localhost:8080"
+	if len(os.Args) > 1 {
+		host = os.Args[1]
+	}
 
 	db, err := sql.Open("sqlite", "db.db")
 	if err != nil {

@@ -21,7 +21,7 @@ import (
 //go:embed tables.sql
 var schema string
 
-func migrate(db *sql.DB) error {
+func createTables(db *sql.DB) error {
 	_, err := db.Exec(schema)
 	return err
 }
@@ -35,7 +35,7 @@ func main() {
 		log.Fatalln(err)
 	}
 	defer db.Close()
-	if err := migrate(db); err != nil {
+	if err := createTables(db); err != nil {
 		log.Fatal(err)
 	}
 

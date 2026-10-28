@@ -1,7 +1,4 @@
-import {
-  useMutation,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import "./App.css";
 import axios from "axios";
 import { Button } from "./components/ui/button";
@@ -55,7 +52,10 @@ export function UploadForm() {
       file: null as File | null,
     },
     onSubmit: async ({ formApi, value }) => {
-      await uploadMutation.mutateAsync(value);
+      if (value.file === null) {
+        return;
+      }
+      await uploadMutation.mutateAsync({ ...value, file: value.file });
       formApi.reset();
     },
   });
@@ -125,7 +125,9 @@ export function UploadForm() {
             <div>
               <Input
                 type="file"
-                onChange={(e) => field.handleChange(e.target.files[0] ?? null)}
+                onChange={(e) =>
+                  field.handleChange(e.target.files?.[0] ?? null)
+                }
               />
               {field.state.value != null && (
                 <p>

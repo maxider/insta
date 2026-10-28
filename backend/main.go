@@ -30,6 +30,8 @@ func main() {
 	logger := slog.New(tint.NewTextHandler(os.Stderr, &tint.Options{Level: slog.LevelDebug}))
 	slog.SetDefault(logger)
 
+	host := os.Args[1]
+
 	db, err := sql.Open("sqlite", "db.db")
 	if err != nil {
 		log.Fatalln(err)
@@ -50,12 +52,12 @@ func main() {
 	}
 	server := server.Server{Db: db, BlobStorage: &storage}
 
-	if err := run(&server); err != nil {
+	if err := run(&server, host); err != nil {
 		log.Fatalln(err)
 	}
 }
 
-func run(s *server.Server) error {
+func run(s *server.Server, host string) error {
 	//TODO: Add middleware
 	// - rate limiting middleware
 	mux := http.NewServeMux()
@@ -66,7 +68,7 @@ func run(s *server.Server) error {
 	mux.HandleFunc("GET /latest", server.Handle(s.HandleLatest))
 
 	server := http.Server{
-		Addr:              "localhost:8080",
+		Addr:              host,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}

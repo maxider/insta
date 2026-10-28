@@ -1,0 +1,6 @@
+file-storage/
+testfiles/
+db.db
+dockerfile
+.dockerignore
+.gitignore

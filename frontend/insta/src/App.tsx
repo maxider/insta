@@ -140,7 +140,7 @@ async function getLatest(filter: string[]): Promise<LatestResponseElement[]> {
 export function UploadButton() {
   const [open, setOpen] = useState(false);
   return (
-    <Dialog open={open} onOpenChange={(open) => setOpen(false)}>
+    <Dialog open={open} onOpenChange={(open) => setOpen(open)}>
       <DialogTrigger
         render={
           <Button size="icon-lg" onClick={() => setOpen(true)}>

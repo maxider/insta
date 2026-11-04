@@ -138,17 +138,18 @@ async function getLatest(filter: string[]): Promise<LatestResponseElement[]> {
 }
 
 export function UploadButton() {
+  const [open, setOpen] = useState(false);
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={(open) => setOpen(false)}>
       <DialogTrigger
         render={
-          <Button size="icon-lg">
+          <Button size="icon-lg" onClick={() => setOpen(true)}>
             <PlusIcon />
           </Button>
         }
       />
       <DialogContent className="ms:max-w-sm">
-        <UploadForm />
+        <UploadForm setOpen={setOpen} />
       </DialogContent>
     </Dialog>
   );

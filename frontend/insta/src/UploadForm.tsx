@@ -22,8 +22,13 @@ import {
 import { TagsInputInput } from "@diceui/tags-input";
 
 import { useForm } from "@tanstack/react-form";
+import type { Dispatch, SetStateAction } from "react";
 
-export function UploadForm() {
+export function UploadForm({
+  setOpen,
+}: {
+  setOpen: Dispatch<SetStateAction<boolean>>;
+}) {
   interface UploadFormArgs {
     title: string;
     tags: string[];
@@ -57,6 +62,7 @@ export function UploadForm() {
       }
       await uploadMutation.mutateAsync({ ...value, file: value.file });
       formApi.reset();
+      setOpen(false);
     },
   });
 

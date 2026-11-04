@@ -12,6 +12,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -142,22 +143,63 @@ func (server *Server) HandleLatest(w http.ResponseWriter, r *http.Request) error
 		}
 	}
 
-	//unused filter fetching. leaving this in as it's ready to use once SQL querry is ready.
-	// filters := make([]string, 0)
-	// if filterParam := r.URL.Query().Get("filter"); filterParam != "" {
-	// 	filters = strings.Split(filterParam, ",")
-	// }
-	// sort.Slice(filters, func(i, j int) bool {
-	// 	return i > j
-	// })
+	filters := make([]string, 0)
+	if filterParam := r.URL.Query().Get("filter"); filterParam != "" {
+		filters = strings.Split(filterParam, ",")
+	}
+	sort.Slice(filters, func(i, j int) bool {
+		return i > j
+	})
+	slog.Debug("filters", "filter", filters)
 
-	// we can use uuid since they are v7
-	rows, err := server.Db.QueryContext(r.Context(), `
+	var query string
+	if len(filters) != 0 {
+		tagFilter := fmt.Sprintf("'%s'", strings.Join(filters, "','"))
+		tagCount := len(filters)
+
+		queryString := fmt.Sprintf(`
+		SELECT id FROM image_data AS image
+			LEFT JOIN image_tags AS it on it.image_id = image.id
+			WHERE it.tag_name IN (%s)
+			GROUP BY image.id
+			HAVING COUNT(id) = %d
+		`, tagFilter, tagCount)
+
+		//first filter out images with said tags
+		rows, err := server.Db.QueryContext(r.Context(), queryString)
+		if err != nil {
+			return fmt.Errorf("error retifing tag filtered image data: %w", err)
+		}
+		ids := make([]string, 0)
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return fmt.Errorf("error parsing tag filterd ids: %w", err)
+			}
+			ids = append(ids, id)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("errors with rows in tag filtering: %w", err)
+		}
+
+		query = fmt.Sprintf(`
+			SELECT id, title, filesize, mime_type, size_x, size_y, created_at, group_concat(j.tag_name) FROM image_data AS image
+				    LEFT JOIN image_tags AS j ON image.id = j.image_id
+					WHERE image.id IN ("%s")
+					GROUP BY image.id
+				    ORDER BY image.id DESC LIMIT %d
+			`, strings.Join(ids, "\",\""), n)
+	} else {
+		query = fmt.Sprintf(`
 		SELECT id, title, filesize, mime_type, size_x, size_y, created_at, group_concat(j.tag_name) FROM image_data AS image
 			    LEFT JOIN image_tags AS j ON image.id = j.image_id
 				GROUP BY image.id
-			    ORDER BY image.id DESC LIMIT ?
+			    ORDER BY image.id DESC LIMIT %d
 		`, n)
+	}
+
+	// we can use uuid since they are v7
+	rows, err := server.Db.QueryContext(r.Context(), query, n)
 	if err != nil {
 		return fmt.Errorf("error retriving latest: %w", err)
 	}
@@ -191,7 +233,6 @@ func (server *Server) HandleLatest(w http.ResponseWriter, r *http.Request) error
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	slog.Debug("Fetched image metadata", "metadata", metadata)
 
 	writeJSON(w, http.StatusOK, NewLatestImagesResponse(metadata))
 
